@@ -1,0 +1,292 @@
+
+#Loading all libraries
+
+
+```{r}
+
+install.packages("gganimate")
+library(gganimate)
+install.packages("stringr")
+install.packages("tidyverse")
+install.packages("fpp2")
+library(dplyr)
+library(stringr)
+library(magrittr)
+library(ggplot2)
+library(lubridate)
+library(fpp2)
+library(reshape2)
+library(hms)
+library(stringr)
+library(tidyr)
+install.packages('devtools')
+install.packages("ggalt")
+
+devtools::install_github('bbc/bbplot')
+install.packages("pacman")
+library(bbplot)
+library(ggalt)
+
+
+install.packages("treemap")
+library(treemap)
+
+install.packages("readxl")
+library(readxl)
+
+```
+
+Importing all the datasets
+```{r}
+
+#This file normally takes 3minutes to import
+
+p_2019 <- read.csv("E:/DAE/FIRST SEM/Computation and Visualization/datasets/nyc-parking-tickets/Parking_Violations_Issued_-_Fiscal_Year_2019.csv", na.strings="", stringsAsFactors=FALSE)
+
+colnames(p_2019)[1]<- "Summons.Number"
+
+vcode <- read_excel("E:/DAE/FIRST SEM/Computation and Visualization/datasets/nyc-parking-tickets/ParkingViolationCodes_Nov_2018.xlsx")
+
+colnames(vcode)=c('Violation.Code', 'desc', 'fine_man','fine_other')
+
+
+
+```
+Doing changes to the  Fiscal Year 2019 data
+
+```{r}
+
+
+#Calculating hour of the day and the day of the week
+#*******************************************************
+
+
+p_2019$Issue.Date <- as.Date(p_2019$Issue.Date, format = "%m/%d/%Y")
+
+p_2019$Day <- wday(p_2019$Issue.Date, label = TRUE) 
+
+p_2019 <-mutate(p_2019, Hour = ifelse(str_detect(Violation.Time,'A'), substr(Violation.Time,1,2), as.numeric(as.numeric(substr(Violation.Time,1,2))+12 )))
+
+p_2019 <- mutate(p_2019, Hour = ifelse( Hour=='12','00',ifelse(Hour=='24','12',Hour)))
+
+#Merging the dataframe with vcode
+
+p_2019<-merge(p_2019, vcode, by = 'Violation.Code')
+
+#Getting the quarter 
+
+
+p_2019$Quarter <- quarter(p_2019$Issue.Date)
+
+```
+b) Adding the borough column
+```{r}
+p_2019 <- mutate(p_2019, Borough =ifelse(Violation.County == "K"|Violation.County == "KINGS"|Violation.County == "KING"|Violation.County == "BK", "Brooklyn", ifelse(Violation.County == "Q" |Violation.County == "QU"| Violation.County == "QUEEN"|Violation.County == "QN"|Violation.County == "QNS", "Queens",ifelse(Violation.County == "R"| Violation.County == "Rich"|Violation.County == "ST", "Staten Island",ifelse(Violation.County == "NY"|Violation.County == "NEWY"|Violation.County == "MAN"|Violation.County == "MH"|Violation.County == "NEW Y"|Violation.County == "MN", "Manhattan", ifelse(Violation.County == "BX"|Violation.County == "PBX"|Violation.County == "BRONX", "Bronx", "Invalid"))))  ))
+
+#Removing rows with invalid values in Borough Column
+p_2019 <- filter(p_2019,p_2019$Borough!= "Invalid")
+
+
+```
+
+
+
+
+
+Plot to show the peak hours during the week
+
+```{r,warning=FALSE}
+day_hour<- p_2019%>%
+  group_by(Day,Hour)%>%
+  summarise(total=n())
+
+day_hour <- filter(day_hour, Hour %in% c('06','07','08','10','11','12','13','14','15','16','17','18','19','20','21','22','23') )
+
+
+
+week_hour_analysis <- ggplot(day_hour, aes(Hour,factor(Day)))+ 
+  geom_tile(aes(fill= total))+
+  ylab(" Day of the week")+
+  xlab("Hours")+ labs(fill= "Number of parking violations") + ggtitle("Peak hours during the week")+scale_fill_gradient(low="blue", high="red")+
+  theme(plot.title = element_text(family="Times New Roman", face="bold", size=18), axis.title.x = element_text(family="Arial",size=16), axis.title.y = element_text(family="Arial",size=16), legend.title = element_text(family="Arial",size=16))
+
+week_hour_analysis
+```
+
+
+Finding which violations decreased the most in Quarter 2
+
+```{r,warning=FALSE}
+
+
+quarter_analysis <- p_2019%>%
+  filter(Quarter=='1'| Quarter =='2')%>%
+  group_by(desc, Quarter)%>%
+  summarise(total=n())
+
+
+
+dumbbell_dataframe <- quarter_analysis %>%
+  select(desc, Quarter, total) %>%
+  spread(Quarter, total) 
+  
+  #Changing NA to 0
+  dumbbell_dataframe[is.na(dumbbell_dataframe)]<-0  
+
+
+#Creating the final df for plot  
+dumbbell_final <- dumbbell_dataframe%>%
+  mutate(gap = `1` - `2`) %>%
+  arrange(desc(gap)) %>%
+  head(10)
+
+#Plotting the dumbell plot
+
+
+
+ggplot(dumbbell_final, aes(x = `1`, xend = `2`, y = reorder(desc, gap), group = desc)) + 
+  geom_dumbbell(colour = "#dddddd",
+                size = 3,
+                colour_x = "#FAAB18",
+                colour_xend = "#1380A1",show.legend = TRUE) +
+  bbc_style() + 
+  labs(title="What happened in Quarter 2?",
+       subtitle=" Decrease in violations, Quarter1-Quarter2")
+
+
+```
+
+Plotting the Treemap
+
+```{r,warning=FALSE}
+df = count(p_2019,Borough,Violation.Precinct)
+df= filter(df,Violation.Precinct!="0")
+treemap(df,index = c("Borough","Violation.Precinct"),vSize = "n",palette="Set3",border.col=c("black","white"),border.lwds=c(7,2),title = "Violation Treemap For Boroughs and Precincts",fontsize.labels = c(15,10),align.labels = list(c("centre","centre"),c("left","top")))
+```
+
+Creating the dataframe for tableau file to show distribution of revenue across precincts
+```{r}
+
+tableau_df <-  count(p_2019, Violation.Precinct, Violation.Code)
+tableau_df= filter(tableau_df,Violation.Precinct!="0")  
+#Adding fine to the violation code
+tableau_df <- left_join(tableau_df, select(vcode, -c(desc,fine_other)),by="Violation.Code")
+tableau_df <- mutate(tableau_df, revenue = n*fine_man)%>%
+  group_by(Violation.Precinct)%>%
+  summarise(total = sum(revenue))
+ 
+  
+write.csv(tableau_df, 'Tableau_file.csv')
+
+  
+```
+
+Importing the data of 2017 and 2018 
+
+```{r}
+p_2017 <- read.csv("E:/DAE/FIRST SEM/Computation and Visualization/datasets/nyc-parking-tickets/Parking_Violations_Issued_-_Fiscal_Year_2017.csv", na.strings="", stringsAsFactors=FALSE)
+
+p_2018 <- read.csv("E:/DAE/FIRST SEM/Computation and Visualization/datasets/nyc-parking-tickets/Parking_Violations_Issued_-_Fiscal_Year_2018.csv", na.strings="", stringsAsFactors=FALSE)
+
+colnames(p_2018)[1]<- "Summons.Number"
+
+
+
+#Changing Issue Date to Date format
+p_2017$Issue.Date <- as.Date(p_2017$Issue.Date, format = "%m/%d/%Y")
+
+p_2018$Issue.Date <- as.Date(p_2018$Issue.Date, format = "%m/%d/%Y")
+
+
+#Selecting relevant columns
+p_2017 <- select(p_2017,  Summons.Number,  Registration.State,Issue.Date,  Violation.Code,  Vehicle.Body.Type, Vehicle.Make , Vehicle.Expiration.Date, Violation.Precinct, Violation.Time, Vehicle.Year,Violation.County)
+
+p_2018 <- select(p_2018,Summons.Number,  Registration.State,Issue.Date,  Violation.Code,  Vehicle.Body.Type, Vehicle.Make , Vehicle.Expiration.Date, Violation.Precinct, Violation.Time, Vehicle.Year, Violation.County)
+
+p_2019 <- select(p_2019,Summons.Number,  Registration.State,Issue.Date,  Violation.Code,  Vehicle.Body.Type, Vehicle.Make , Vehicle.Expiration.Date, Violation.Precinct, Violation.Time, Vehicle.Year, Violation.County)
+
+
+
+
+```
+
+Creating the dataframe by merging the datasets
+
+```{r}
+p_merged <- rbind(p_2017,p_2018,p_2019)
+```
+
+
+Plotting the quarter wise analysis of number of violations
+```{r,warning= FALSE}
+  
+p_merged$Quarter <- quarter(p_merged$Issue.Date)
+
+p_merged$Year <- year(p_merged$Issue.Date)
+
+
+
+time_analysis <- p_merged%>%
+  group_by(Year, Quarter)%>%
+  summarise(total= n())  
+  
+time_analysis <- filter(time_analysis, Year %in% c(2017,2018,2019))  
+time_analysis <- time_analysis[-c(11,12),]
+
+time_analysis$Label <- c("2017 Q1","2017 Q2","2017 Q3","2017 Q4","2018 Q1","2018 Q2","2018 Q3","2018 Q4","2019 Q1","2019 Q2")
+
+#Plotting
+  
+ggplot(time_analysis, aes(x = Label, y = total,group =1, color= factor(Year))) + 
+  geom_line(stat = 'identity')+
+  geom_point()+
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  bbc_style() +
+  labs(title="Parking Violations in NYC 2017-2019")
+  
+```
+
+```{r}
+
+p_2019$Quarter <- quarter(p_2019$Issue.Date)
+
+p_2019 <- mutate(p_2019, Borough =ifelse(Violation.County == "K"|Violation.County == "KINGS"|Violation.County == "KING"|Violation.County == "BK", "Brooklyn", ifelse(Violation.County == "Q" |Violation.County == "QU"| Violation.County == "QUEEN"|Violation.County == "QN"|Violation.County == "QNS", "Queens",ifelse(Violation.County == "R"| Violation.County == "Rich"|Violation.County == "ST", "Staten Island",ifelse(Violation.County == "NY"|Violation.County == "NEWY"|Violation.County == "MAN"|Violation.County == "MH"|Violation.County == "NEW Y"|Violation.County == "MN", "Manhattan", ifelse(Violation.County == "BX"|Violation.County == "PBX"|Violation.County == "BRONX", "Bronx", "Invalid"))))  ))
+
+#Removing rows with invalid values in Borough Column
+p_2019 <- filter(p_2019,p_2019$Borough!= "Invalid")
+
+
+```
+
+Finding out which violations are being taken casuallu
+
+
+```{r}
+
+vcode_fine <- p_2019%>%
+  filter(Borough=="Manhattan")%>%
+  group_by(Violation.Code,fine_man,desc)%>%
+  summarise(total=n())%>%
+  arrange(desc(total))%>%
+  head(20)%>%
+  mutate(ratio=total/fine_man)%>%
+  arrange(desc(ratio))%>%
+  head(10)
+  
+```
+
+Plotting the map
+
+```{r,warning=FALSE}
+
+ggplot(vcode_fine, aes(x=total, y=fine_man, color=factor(desc))) + 
+  geom_point()+xlab('Number of violations')+ ylab("Fine")+ggtitle("Which violations are taken casually?")+labs(color='Violation Description') +
+  theme(plot.title = element_text(family="Times New Roman", face="bold", size=18), axis.title.x = element_text(family="Arial",size=16), axis.title.y = element_text(family="Arial",size=16), legend.title = element_text(family="Arial",size=16))
+  
+
+
+
+```
+
+
+
